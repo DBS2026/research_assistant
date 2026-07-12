@@ -8,7 +8,7 @@ python-dotenv==1.2.2
 PyMuPDF==1.28.0
 tavily-python==0.7.26
 requests==2.34.2
-
+email-validator==2.3.0
 # --- Backend API layer ---
 fastapi==0.139.0
 uvicorn[standard]==0.49.0
