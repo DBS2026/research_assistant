@@ -23,7 +23,7 @@ from dotenv import load_dotenv
 set_llm_cache(SQLiteCache(database_path=".langchain_llm_cache.db"))
 load_dotenv()
 
-from academic_search import search_all_academic_sources
+from app.academic_search import search_all_academic_sources
 
 # -----------------------------
 # 1) Schemas & Pydantic Elements
@@ -241,7 +241,13 @@ def get_llm_client(structured_output_cls=None):
     client = ChatGoogleGenerativeAI(
         model="gemini-flash-latest",
         google_api_key=os.getenv("GOOGLE_API_KEY"),
-        temperature=0.3
+        temperature=0.3,
+        # Large structured-output requests (see CoreAnalysisPack) can
+        # legitimately take well over a minute to generate. Without an
+        # explicit timeout, some environments' default is short enough that
+        # the connection gets dropped mid-generation, surfacing as
+        # httpx.RemoteProtocolError rather than a clean timeout error.
+        timeout=300,
     )
     if structured_output_cls:
         return client.with_structured_output(structured_output_cls)
@@ -260,20 +266,38 @@ def _validate_messages(messages) -> None:
             raise ValueError(f"Empty message detected: {type(m).__name__} has an empty content list")
 
 def invoke_llm_with_retry(messages, structured_output_cls=None):
+    import httpx
+    import ssl
+
     _validate_messages(messages)
     model = get_llm_client(structured_output_cls)
+    # Transient network faults: the Gemini backend (or an intermediary proxy/
+    # VPN/firewall) can silently drop the connection on slow requests (large
+    # structured-output payloads regularly exceed ~60s), which surfaces as
+    # httpx.RemoteProtocolError / ssl.SSLError rather than an HTTP status
+    # code. These are safe to retry as-is; a quota or auth error is not.
+    TRANSIENT_EXCEPTIONS = (httpx.RemoteProtocolError, httpx.ConnectError, httpx.ReadTimeout, ssl.SSLError)
+
+    last_err: Optional[Exception] = None
     for attempt in range(5):
         try:
             return model.invoke(messages)
+        except TRANSIENT_EXCEPTIONS as e:
+            last_err = e
+            time.sleep(5 * (attempt + 1))
+            continue
         except Exception as e:
             err_str = str(e)
             if "GenerateRequestsPerDayPerProjectPerModel" in err_str or "quota exceeded" in err_str.lower():
                 raise RuntimeError("❌ Critical Error: Gemini Free Tier Request Quota exhausted.") from e
             if "429" in err_str or "RESOURCE_EXHAUSTED" in err_str:
+                last_err = e
                 time.sleep(10 * (attempt + 1))
                 continue
             raise e
-    return model.invoke(messages)
+    raise RuntimeError(
+        f"❌ Gemini request failed after 5 attempts due to a network/connection error: {last_err}"
+    ) from last_err
 
 def _get_clean_content(response) -> str:
     content = getattr(response, "content", response)

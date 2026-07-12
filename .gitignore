@@ -1,5 +1,44 @@
+# Virtual environment
 venv/
+.venv/
+
+# Python
 __pycache__/
+*.py[cod]
+*$py.class
+
+# Environment variables
 .env
+
+# LangChain cache
 .langchain_llm_cache/
-*.pyc
+
+# Uploads
+uploads/
+
+# Generated figures
+extracted_figures/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Pytest
+.pytest_cache/
+
+# Mypy
+.mypy_cache/
+
+# Ruff
+.ruff_cache/
+
+# Coverage
+.coverage
+htmlcov/
